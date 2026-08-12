@@ -109,13 +109,19 @@ def fetch_zhipu_usage_daily(headless=True, timeout=60):
                     acc = call(API_ACCOUNT)
                     d = acc.get("data") or {}
                     result["ok"] = True
+                    tc_total = float(d.get("totalSpendAmount", 0) or 0)
+                    tc_today = (float(d["todaySpendAmount"])
+                                if d.get("todaySpendAmount") is not None else None)
+                    # 兜底：累计消费不能小于今日消费（口径不一致时）
+                    if tc_today is not None and tc_total < tc_today:
+                        tc_total = tc_today
                     result["data"] = {
                         "balance": "%.2f" % (float(d.get("availableBalance", 0) or 0)),
                         "recharge": "%.2f" % (float(d.get("rechargeAmount", 0) or 0)),
                         "granted": "%.2f" % (float(d.get("giveAmount", 0) or 0)),
-                        "total_cost": "%.2f" % (float(d.get("totalSpendAmount", 0) or 0)),
-                        "today_consume": ("%.2f" % float(d["todaySpendAmount"])
-                                          if d.get("todaySpendAmount") is not None else None),
+                        "total_cost": "%.2f" % tc_total,
+                        "today_consume": ("%.2f" % tc_today
+                                          if tc_today is not None else None),
                     }
                 except Exception as e:  # noqa: BLE001
                     result = {"ok": False, "error": f"账户报告失败: {e}"}

@@ -109,7 +109,11 @@ def check_moonshot(api_key, base_url):
     lines = []
     for k, label in (("cash_balance", "现金余额"), ("voucher_balance", "代金券")):
         if data.get(k) is not None:
-            lines.append(f"{label}：{data.get(k)}")
+            try:
+                v = f"{float(data.get(k)):.2f}"
+            except (TypeError, ValueError):
+                v = data.get(k)
+            lines.append(f"{label}：{v}")
     return {"ok": True, "value": avail, "unit": "CNY", "lines": lines, "badge": "Kimi"}
 
 

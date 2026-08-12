@@ -494,7 +494,12 @@ class BalanceApp:
                 # 未同步：先用 HTTP 接口余额（有就保留），已消费/每日用量需同步官方
                 unit = res.get("unit") or ""
                 symbol = "¥" if unit == "CNY" else ""
-                bal_txt = f"{symbol}{res.get('value')} {unit}" if unit else f"{res.get('value')}"
+                val = res.get("value")
+                try:
+                    val = f"{float(val):.2f}"
+                except (TypeError, ValueError):
+                    pass
+                bal_txt = f"{symbol}{val} {unit}" if unit else f"{val}"
             else:
                 bal_txt = "——"
         elif res is None:
@@ -511,7 +516,12 @@ class BalanceApp:
                     symbol = "¥"
                 elif unit == "USD":
                     symbol = "$"
-                bal_txt = f"{symbol}{res.get('value')} {unit}" if unit else f"{res.get('value')}"
+                val = res.get("value")
+                try:
+                    val = f"{float(val):.2f}"
+                except (TypeError, ValueError):
+                    pass
+                bal_txt = f"{symbol}{val} {unit}" if unit else f"{val}"
         else:
             bal_txt = "——"
         tk.Label(mid, text=bal_txt, bg=COLOR_CARD, fg=COLOR_PRIMARY,
@@ -620,13 +630,15 @@ class BalanceApp:
             else:
                 usage_txt = "该服务商暂无用量统计权限"
         elif is_deepseek and self.official_data and self.official_data.get("ok"):
-            d = self.official_data["data"]
-            usage_txt = (f"🌐 官方：请求 {d.get('requests', '?')} 次 · "
-                         f"Token {int(float(d.get('tokens', 0))):,}")
-            if d.get("models"):
-                mdl = " · ".join(f"{m['model']} {m.get('requests', 0)}次/{m.get('tokens', 0):,}t"
-                                 for m in d["models"])
-                usage_txt += f"\n{mdl}"
+            # 不显示请求次数/Token（官网实时增长，软件是同步快照，无法一致）
+            tstr = ""
+            ts = self.official_data.get("synced_at")
+            if ts:
+                try:
+                    tstr = "（更新于 " + datetime.datetime.fromtimestamp(ts).strftime("%H:%M") + "）"
+                except Exception:  # noqa: BLE001
+                    tstr = ""
+            usage_txt = f"🌐 已同步官方{tstr}"
         elif is_deepseek:
             usage_txt = "📈 点击「🌐 同步官方」查看官方真实数据"
         elif res is None and acc:
@@ -1002,16 +1014,33 @@ class BalanceApp:
     def _refresh_page_tokens_bg(self, r):
         try:
             new_tok = browser_sync._fetch_page_tokens(headless=True, timeout=60)
+            changed = False
             if new_tok is not None and r.get("ok") and r.get("data"):
                 r["data"]["tokens"] = str(new_tok)
+                changed = True
             # 请求次数同样以官方页面统计卡为准
             new_req = browser_sync._page_requests_cached()
             if new_req is not None and r.get("ok") and r.get("data"):
                 r["data"]["requests"] = str(new_req)
+                changed = True
+            if changed:
+                r["synced_at"] = time.time()
+                self.ui_queue.put(self._refresh_deepseek_card)
         except Exception:  # noqa: BLE001
             pass
 
+    def _refresh_deepseek_card(self):
+        """主线程：按最新页面值重建 DeepSeek 卡片（同步官方后立即刷新显示）。"""
+        for acc in self.accounts:
+            if acc.get("provider") == "deepseek":
+                try:
+                    self._update_card(acc["id"])
+                except Exception:  # noqa: BLE001
+                    pass
+
     def _finish_sync(self, result, daily=None):
+        if isinstance(result, dict):
+            result["synced_at"] = time.time()   # 记录同步时刻，让数据透明（官网是实时的）
         self.official_data = result
         if daily is not None:
             self.daily_data = daily
@@ -1432,8 +1461,10 @@ class BalanceApp:
                 tip = "该主账号暂无消费记录（智谱无消费时按日账单为空）"
             elif master and master.get("provider") == "openrouter":
                 tip = "该主账号暂无消费记录（OpenRouter 无用量时 analytics 为空）"
+            elif master and master.get("provider") == "siliconflow":
+                tip = "该主账号暂无消费记录（硅基流动无消费时按日账单为空）"
             else:
-                tip = "该主账号暂无逐日用量数据（目前仅 DeepSeek 平台支持逐日）"
+                tip = "该主账号暂无逐日用量数据"
             tk.Label(win, text=tip, bg=COLOR_BG, fg=COLOR_SUB,
                      font=FONT_SMALL).pack(pady=(8, 6))
 
@@ -1735,22 +1766,26 @@ class BalanceApp:
         win.geometry("380x260")
         win.configure(bg=COLOR_BG)
         win.resizable(False, False)
-        info = (f"日期：{date_str}\n\n"
-                f"金额：¥{rec['cost']:.4f}\n"
-                f"Token：{rec['tokens']:,}\n"
-                f"请求次数：{rec['requests']}")
-        tk.Label(win, text=info, bg=COLOR_BG, fg=COLOR_TEXT, font=FONT_NORMAL,
-                 justify="left").pack(padx=24, pady=(18, 10))
         prov = rec.get("provider", "deepseek")
+        # 能提供 Token/请求维度的服务商才显示对应数据，否则明确「暂不支持」
+        has_token_dim = prov in ("deepseek", "openrouter")
+        info = [f"日期：{date_str}", "",
+                f"金额：¥{rec['cost']:.4f}"]
+        if has_token_dim:
+            info += [f"Token：{rec['tokens']:,}", f"请求次数：{rec['requests']}"]
+        else:
+            info += ["Token：暂不支持", "请求次数：暂不支持"]
+        tk.Label(win, text="\n".join(info), bg=COLOR_BG, fg=COLOR_TEXT, font=FONT_NORMAL,
+                 justify="left").pack(padx=24, pady=(18, 10))
         if prov in ("deepseek", "openrouter"):
-            # 每小时分布：DeepSeek / OpenRouter 有官方接口；其他服务商暂无
+            # 每小时分布：DeepSeek / OpenRouter 有官方接口
             ios_ui.iOSButton(win, "每小时 Token 分布",
                              lambda: self._draw_hourly(date_str, "token", prov), color=ios_ui.SYNC_BG, fg=ios_ui.SYNC_FG,
                              width=168, height=36, font_size=10).pack(pady=(4, 0))
             tk.Label(win, text="查看该天每小时 Token 用量",
                      bg=COLOR_BG, fg=COLOR_SUB2, font=FONT_SMALL).pack(pady=(8, 0))
         else:
-            tk.Label(win, text="该服务商暂无每小时分布数据",
+            tk.Label(win, text="该服务商暂不支持每小时 Token 分布",
                      bg=COLOR_BG, fg=COLOR_SUB2, font=FONT_SMALL).pack(pady=(8, 0))
 
     # ------------------------------------------------------------------ 用量图

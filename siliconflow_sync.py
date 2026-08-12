@@ -179,6 +179,14 @@ def fetch_siliconflow_usage_daily(headless=True, timeout=90):
                     tc = next((r["cost"] for r in result["daily"] if r["date"] == tdy), None)
                     if tc is not None:
                         result["data"]["today_consume"] = "%.2f" % tc
+                # 兜底：累计消费不能小于今日消费（口径不一致时）
+                try:
+                    if (result["data"].get("today_consume") is not None
+                            and float(result["data"].get("total_cost") or 0)
+                            < float(result["data"]["today_consume"])):
+                        result["data"]["total_cost"] = result["data"]["today_consume"]
+                except (TypeError, ValueError):
+                    pass
             finally:
                 ctx.close()
     except Exception as e:  # noqa: BLE001

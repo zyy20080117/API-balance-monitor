@@ -179,20 +179,31 @@ def fetch_kimi_usage_daily(headless=True, timeout=60):
                 if info["oid"] and info["tok"]:
                     result["daily"] = _fetch_kimi_daily_via(page, info["oid"], info["tok"], timeout)
                 if info["use"] is not None:
+                    # 累计消费 = 充值 + 赠送 - 当前余额（Kimi 的 use 只统计现金，不准）
+                    total = ((info.get("acc") or 0) + (info.get("voucher_acc") or 0)
+                             - (info.get("cur") or 0) - (info.get("voucher_cur") or 0)) / 100000.0
+                    if total < 0:
+                        total = 0.0
+                    today = (info.get("today") or 0) / 100000.0
+                    # 官网"消费金额"口径在每日账单里（含赠送账户扣减），更完整则优先
+                    if result["daily"]:
+                        daily_total = sum(r["cost"] for r in result["daily"])
+                        if daily_total > total:
+                            total = daily_total
+                        tdy = datetime.date.today().isoformat()
+                        tc = next((r["cost"] for r in result["daily"] if r["date"] == tdy), None)
+                        if tc is not None:
+                            today = tc
+                    # 兜底：累计消费不能小于今日消费（口径不一致时）
+                    if total < today:
+                        total = today
                     data = {
-                        "total_cost": "%.2f" % (info["use"] / 100000.0),
-                        "today_consume": "%.2f" % ((info["today"] or 0) / 100000.0),
+                        "total_cost": "%.2f" % total,
+                        "today_consume": "%.2f" % today,
                         "balance": "%.2f" % (((info["cur"] or 0) + (info["voucher_cur"] or 0)) / 100000.0),
                         "recharge": "%.2f" % ((info["acc"] or 0) / 100000.0),
                         "granted": "%.2f" % ((info["voucher_acc"] or 0) / 100000.0),
                     }
-                    # 官网"消费金额"口径在每日账单里（含赠送账户扣减），有数据时优先
-                    if result["daily"]:
-                        data["total_cost"] = "%.2f" % sum(r["cost"] for r in result["daily"])
-                        tdy = datetime.date.today().isoformat()
-                        tc = next((r["cost"] for r in result["daily"] if r["date"] == tdy), None)
-                        if tc is not None:
-                            data["today_consume"] = "%.2f" % tc
                     result.update({"ok": True, "data": data})
             finally:
                 ctx.close()
