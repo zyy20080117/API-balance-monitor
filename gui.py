@@ -22,6 +22,7 @@ import browser_sync
 import ios_ui
 import kimi_sync
 import logger
+import openrouter_sync
 import providers
 import siliconflow_sync
 import storage
@@ -142,6 +143,8 @@ class BalanceApp:
         self.zhipu_data = self._load_zhipu_cache()
         # 硅基流动浏览器同步结果：同样优先读缓存
         self.siliconflow_data = self._load_siliconflow_cache()
+        # OpenRouter 浏览器同步结果（每日用量）缓存
+        self.openrouter_data = self._load_openrouter_cache()
         self.last_update = None
         self.refresh_lock = threading.Lock()
         _settings = storage.load_settings()
@@ -157,6 +160,7 @@ class BalanceApp:
         self._alerts = dict(_settings.get("alerts", {}) or {})
         # 列表排序模式（空=默认添加顺序；time/balance/name），数据更新后保持重排
         self._sort_mode = str(_settings.get("sort_mode", "") or "")
+        self._net_retry = 0   # 开机网络未就绪时的自动重试计数
         # 兼容旧版本单一预警阈值：迁移到主账号
         old_th = float(_settings.get("alert_threshold", 0) or 0)
         if not self._alerts and old_th > 0 and self._master_id:
@@ -421,6 +425,7 @@ class BalanceApp:
         s_ok = bool(is_siliconflow and getattr(self, "siliconflow_data", None)
                     and self.siliconflow_data.get("ok"))
         s_syncing = bool(is_siliconflow and getattr(self, "_siliconflow_syncing", False))
+        is_openrouter = acc.get("provider") == "openrouter"
 
         # 顶行：名称 + 服务商 + 状态
         top = tk.Frame(card, bg=COLOR_CARD)
@@ -451,6 +456,9 @@ class BalanceApp:
             state_txt, state_color = "查询中…", "#d97706"
         elif res.get("ok"):
             state_txt, state_color = "✔ 正常", COLOR_OK
+        elif self._is_network_error(res):
+            # 开机/网络未就绪：不是账号问题，不标红叉，稍后自动重试
+            state_txt, state_color = "⏳ 网络未就绪", "#d97706"
         else:
             state_txt, state_color = "✖ 异常", COLOR_ERR
         # 顶行右侧：状态 + 编辑/删除按钮（可直接改账号名称或删除）
@@ -527,6 +535,19 @@ class BalanceApp:
                 cost_txt = "已消费：同步中…"
             else:
                 cost_txt = "已消费：——"
+        elif is_openrouter:
+            od = getattr(self, "openrouter_data", None)
+            if od and od.get("ok") and od["data"].get("total_cost") not in (None, ""):
+                cost_txt = "已消费：$" + od["data"].get("total_cost", "?")
+            elif res and res.get("ok"):
+                used = ""
+                for line in (res.get("lines") or []):
+                    if "已使用" in line:
+                        used = line.replace("已使用：", "")
+                        break
+                cost_txt = "已消费：$" + (used or "——")
+            else:
+                cost_txt = "已消费：——"
         elif is_deepseek and self.official_data and self.official_data.get("ok"):
             d = self.official_data["data"]
             cost_txt = f"已消费：¥{d.get('total_cost', '?')}"
@@ -581,6 +602,23 @@ class BalanceApp:
                 usage_txt = "正在同步硅基流动官方数据…"
             else:
                 usage_txt = "📈 点击「🌐 同步官方」查看余额与消费"
+        elif is_openrouter:
+            od = getattr(self, "openrouter_data", None)
+            if od and od.get("ok"):
+                d = od["data"]
+                today = d.get("today_consume")
+                if today is not None:
+                    usage_txt = f"🌐 今日消费 ${today} · 累计 ${d.get('total_cost', '?')}"
+                elif any(r.get("provider") == "openrouter" for r in (self.daily_data or [])):
+                    usage_txt = f"🌐 累计消费 ${d.get('total_cost', '?')}"
+                else:
+                    usage_txt = "🌐 已同步官方 · 暂无用量记录"
+            elif getattr(self, "_openrouter_syncing", False):
+                usage_txt = "正在同步 OpenRouter 官方数据…"
+            elif res and res.get("ok"):
+                usage_txt = "📈 点击「🌐 同步官方」查看每日用量"
+            else:
+                usage_txt = "该服务商暂无用量统计权限"
         elif is_deepseek and self.official_data and self.official_data.get("ok"):
             d = self.official_data["data"]
             usage_txt = (f"🌐 官方：请求 {d.get('requests', '?')} 次 · "
@@ -641,11 +679,22 @@ class BalanceApp:
             detail = "正在连接服务器…"
         elif res.get("ok"):
             detail = "  ·  ".join(res.get("lines") or []) or "—"
+        elif self._is_network_error(res):
+            detail = "网络未连接，稍后自动重试"
         else:
             detail = res.get("error", "查询失败")
         tk.Label(bot, text=detail, bg=COLOR_CARD, fg=COLOR_SUB, font=FONT_SMALL,
                  wraplength=470, justify="left").pack(anchor="w")
         return card
+
+    def _is_network_error(self, res):
+        """判断查询结果是否为网络类错误（开机网络未就绪等），非账号本身问题。"""
+        if not res:
+            return False
+        err = str(res.get("error", ""))
+        return ("ConnectionError" in err or "无法连接服务器" in err
+                or "Max retries" in err or "timeout" in err.lower()
+                or "timed out" in err.lower())
 
     def _card_menu(self, event, acc):
         menu = tk.Menu(self.root, tearoff=0, font=FONT_NORMAL)
@@ -683,9 +732,17 @@ class BalanceApp:
 
     def _worker_all(self):
         try:
+            # 并行查询所有账号余额（账号多时避免串行导致「查询中」很久）
+            threads = []
             for acc in self.accounts:
-                res = providers.check_account(acc["provider"], acc["api_key"], acc["base_url"])
-                self.ui_queue.put(lambda i=acc["id"], r=res: self._finish_one(i, r))
+                def _query(a=acc):
+                    res = providers.check_account(a["provider"], a["api_key"], a["base_url"])
+                    self.ui_queue.put(lambda i=a["id"], r=res: self._finish_one(i, r))
+                t = threading.Thread(target=_query, daemon=True)
+                t.start()
+                threads.append(t)
+            for t in threads:
+                t.join()
             self.ui_queue.put(self._finish_all)
         finally:
             self.refresh_lock.release()
@@ -702,6 +759,11 @@ class BalanceApp:
 
     def _finish_one(self, acc_id, res):
         self.results[acc_id] = res
+        # 立即重建该卡片，避免等 _finish_all 才显示、长时间停留在「查询中」
+        try:
+            self._update_card(acc_id)
+        except Exception:  # noqa: BLE001
+            pass
 
     def _finish_all(self):
         # 刷新全部完成后按所选排序方式重排（过程中保持稳定）
@@ -726,7 +788,18 @@ class BalanceApp:
                 and self.siliconflow_data is None
                 and not getattr(self, "_siliconflow_syncing", False)):
             threading.Thread(target=self._worker_siliconflow_sync, daemon=True).start()
+        # OpenRouter 同理（每日用量浏览器同步）
+        if (any(a.get("provider") == "openrouter" for a in self.accounts)
+                and self.openrouter_data is None
+                and not getattr(self, "_openrouter_syncing", False)):
+            threading.Thread(target=self._worker_openrouter_sync, daemon=True).start()
         self._check_alert()
+        # 开机网络未就绪：有网络错误账号时延迟自动重试（最多 3 次），避免一开机全是红叉
+        if any(self._is_network_error(self.results.get(a["id"])) for a in self.accounts):
+            n = getattr(self, "_net_retry", 0)
+            if n < 3:
+                self._net_retry = n + 1
+                self.root.after(8000, self.refresh_all)
 
     # ------------------------------------------------------------------ 官方同步
     def sync_official(self):
@@ -753,15 +826,17 @@ class BalanceApp:
             except Exception:
                 out["daily"] = None
 
-        # 概览、逐日、Kimi、智谱、硅基流动同步并行启动；谁先完成谁先更新对应卡片，互不拖慢
+        # 概览、逐日、Kimi、智谱、硅基流动、OpenRouter 同步并行启动；谁先完成谁先更新对应卡片，互不拖慢
         has_kimi = any(a.get("provider") == "moonshot" for a in self.accounts)
         has_zhipu = any(a.get("provider") == "zhipu" for a in self.accounts)
         has_sf = any(a.get("provider") == "siliconflow" for a in self.accounts)
+        has_or = any(a.get("provider") == "openrouter" for a in self.accounts)
         t1 = threading.Thread(target=_run_usage, daemon=True)
         t2 = threading.Thread(target=_run_daily, daemon=True)
         t3 = threading.Thread(target=self._worker_kimi_sync, daemon=True)
         t4 = threading.Thread(target=self._worker_zhipu_sync, daemon=True)
         t5 = threading.Thread(target=self._worker_siliconflow_sync, daemon=True)
+        t6 = threading.Thread(target=self._worker_openrouter_sync, daemon=True)
         t1.start()
         t2.start()
         if has_kimi:
@@ -770,6 +845,8 @@ class BalanceApp:
             t4.start()   # 智谱同步同样并行
         if has_sf:
             t5.start()   # 硅基流动同步同样并行
+        if has_or:
+            t6.start()   # OpenRouter 同步同样并行
         # ① 用量完成即先更新（不等待逐日 / Kimi），快的先显示
         t1.join()
         r = out.get("usage") or {"ok": False, "error": "同步失败"}
@@ -782,13 +859,15 @@ class BalanceApp:
         t2.join()
         if out.get("daily"):
             self.ui_queue.put(lambda dd=out["daily"]: self._daily_synced(dd))
-        # ③ Kimi / 智谱 / 硅基流动同步完成：各自已入队 _finish_*
+        # ③ Kimi / 智谱 / 硅基流动 / OpenRouter 同步完成：各自已入队 _finish_*
         if has_kimi:
             t3.join()
         if has_zhipu:
             t4.join()
         if has_sf:
             t5.join()
+        if has_or:
+            t6.join()
         # 所有同步完成后按最新数据重排一次（同步过程中不重排，避免中间态乱序）
         self.ui_queue.put(self._apply_sort_after_sync)
 
@@ -885,6 +964,38 @@ class BalanceApp:
                     pass
         for acc in self.accounts:
             if acc.get("provider") == "siliconflow":
+                self._update_card(acc["id"])
+        self._check_alert()
+
+    def _worker_openrouter_sync(self):
+        self._openrouter_syncing = True
+        daily = []
+        api_key = next((a.get("api_key", "") for a in self.accounts
+                        if a.get("provider") == "openrouter"), "")
+        try:
+            # 浏览器 profile 全局串行：与 Kimi/智谱/硅基流动/DeepSeek 不能同时开浏览器
+            with browser_sync._BROWSER_LOCK:
+                r = openrouter_sync.fetch_openrouter_usage_daily(api_key, headless=True, timeout=90)
+            o = {"ok": bool(r.get("ok")), "data": r.get("data") or {},
+                 "error": r.get("error") or ""}
+            daily = r.get("daily") or []
+        except Exception as e:  # noqa: BLE001
+            o = {"ok": False, "error": f"{e.__class__.__name__}: {e}"}
+        self.ui_queue.put(lambda oo=o, dd=daily: self._finish_openrouter(oo, dd))
+
+    def _finish_openrouter(self, o, daily=None):
+        self._openrouter_syncing = False
+        self.openrouter_data = o
+        self._save_openrouter_cache()
+        if daily:
+            self._merge_daily(daily)
+            if getattr(self, "_cal_win", None):
+                try:
+                    self._render_calendar()
+                except Exception:  # noqa: BLE001
+                    pass
+        for acc in self.accounts:
+            if acc.get("provider") == "openrouter":
                 self._update_card(acc["id"])
         self._check_alert()
 
@@ -1016,6 +1127,28 @@ class BalanceApp:
             pass
         return None
 
+    def _save_openrouter_cache(self):
+        if not self.openrouter_data:
+            return
+        try:
+            path = os.path.join(os.path.expanduser("~"), ".model_balance", "openrouter_cache.json")
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(self.openrouter_data, f, ensure_ascii=False)
+        except Exception:
+            pass
+
+    def _load_openrouter_cache(self):
+        try:
+            path = os.path.join(os.path.expanduser("~"), ".model_balance", "openrouter_cache.json")
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+            if data and data.get("ok"):
+                return data
+        except Exception:
+            pass
+        return None
+
     def _check_alert(self):
         """余额预警：主账号余额低于阈值时弹窗。"""
         threshold = self._alert_threshold_for()
@@ -1086,6 +1219,11 @@ class BalanceApp:
                 return float(self.siliconflow_data["data"].get("balance", 0))
             except (TypeError, ValueError):
                 return None
+        if p == "openrouter" and getattr(self, "openrouter_data", None) and self.openrouter_data.get("ok"):
+            try:
+                return float(self.openrouter_data["data"].get("balance", 0))
+            except (TypeError, ValueError):
+                return None
         res = self.results.get(m["id"])
         if res and res.get("ok"):
             try:
@@ -1116,6 +1254,8 @@ class BalanceApp:
             return [r for r in all_recs if r.get("provider") == "zhipu"]
         if p == "siliconflow":
             return [r for r in all_recs if r.get("provider") == "siliconflow"]
+        if p == "openrouter":
+            return [r for r in all_recs if r.get("provider") == "openrouter"]
         return []
 
     def _update_master_ui(self):
@@ -1157,6 +1297,10 @@ class BalanceApp:
             has_kd = any(r.get("provider") == "siliconflow" for r in (self.daily_data or []))
             if not has_kd and not getattr(self, "_siliconflow_syncing", False):
                 threading.Thread(target=self._worker_siliconflow_sync, daemon=True).start()
+        elif master and master.get("provider") == "openrouter":
+            has_kd = any(r.get("provider") == "openrouter" for r in (self.daily_data or []))
+            if not has_kd and not getattr(self, "_openrouter_syncing", False):
+                threading.Thread(target=self._worker_openrouter_sync, daemon=True).start()
         win = tk.Toplevel(self.root)
         win.title("每日用量")
         win.geometry("580x520")
@@ -1286,6 +1430,8 @@ class BalanceApp:
                 tip = "该主账号暂无消费记录（Kimi 日账单于次日上午更新）"
             elif master and master.get("provider") == "zhipu":
                 tip = "该主账号暂无消费记录（智谱无消费时按日账单为空）"
+            elif master and master.get("provider") == "openrouter":
+                tip = "该主账号暂无消费记录（OpenRouter 无用量时 analytics 为空）"
             else:
                 tip = "该主账号暂无逐日用量数据（目前仅 DeepSeek 平台支持逐日）"
             tk.Label(win, text=tip, bg=COLOR_BG, fg=COLOR_SUB,
@@ -1595,11 +1741,17 @@ class BalanceApp:
                 f"请求次数：{rec['requests']}")
         tk.Label(win, text=info, bg=COLOR_BG, fg=COLOR_TEXT, font=FONT_NORMAL,
                  justify="left").pack(padx=24, pady=(18, 10))
-        ios_ui.iOSButton(win, "每小时 Token 分布",
-                         lambda: self._draw_hourly(date_str, "token"), color=ios_ui.SYNC_BG, fg=ios_ui.SYNC_FG,
-                         width=168, height=36, font_size=10).pack(pady=(4, 0))
-        tk.Label(win, text="查看该天每小时 Token 用量",
-                 bg=COLOR_BG, fg=COLOR_SUB2, font=FONT_SMALL).pack(pady=(8, 0))
+        prov = rec.get("provider", "deepseek")
+        if prov in ("deepseek", "openrouter"):
+            # 每小时分布：DeepSeek / OpenRouter 有官方接口；其他服务商暂无
+            ios_ui.iOSButton(win, "每小时 Token 分布",
+                             lambda: self._draw_hourly(date_str, "token", prov), color=ios_ui.SYNC_BG, fg=ios_ui.SYNC_FG,
+                             width=168, height=36, font_size=10).pack(pady=(4, 0))
+            tk.Label(win, text="查看该天每小时 Token 用量",
+                     bg=COLOR_BG, fg=COLOR_SUB2, font=FONT_SMALL).pack(pady=(8, 0))
+        else:
+            tk.Label(win, text="该服务商暂无每小时分布数据",
+                     bg=COLOR_BG, fg=COLOR_SUB2, font=FONT_SMALL).pack(pady=(8, 0))
 
     # ------------------------------------------------------------------ 用量图
     def show_hourly_chart(self, date_str):
@@ -1620,18 +1772,42 @@ class BalanceApp:
         ios_ui.iOSButton(win, "金额用量图", lambda: pick("cost"), color=ios_ui.SYNC_BG, fg=ios_ui.SYNC_FG,
                          width=132, height=34, font_size=10).pack(pady=4)
 
-    def _draw_hourly(self, date_str, mode):
+    def _draw_hourly(self, date_str, mode, provider="deepseek"):
+        # 立即弹出加载窗口，避免等待时无反馈（官方数据，令牌失效时需开浏览器，可能较慢）
+        win = tk.Toplevel(self.root)
+        win.title("加载中")
+        win.geometry("340x150")
+        win.configure(bg=COLOR_BG)
+        win.resizable(False, False)
+        tk.Label(win, text="正在获取小时数据…", bg=COLOR_BG, fg=COLOR_TEXT,
+                 font=FONT_NORMAL).pack(pady=(34, 6))
+        pname = _provider_id_to_name(provider)
+        tk.Label(win, text=f"{date_str} · {pname} 官方数据", bg=COLOR_BG,
+                 fg=COLOR_SUB2, font=FONT_SMALL).pack()
+        self._hourly_loading_win = win
+        self._hourly_loading_meta = (date_str, mode)
         self._update_status(f"正在获取 {date_str} 的小时数据…")
-        threading.Thread(target=self._worker_hourly, args=(date_str, mode), daemon=True).start()
+        threading.Thread(target=self._worker_hourly, args=(date_str, mode, provider), daemon=True).start()
 
-    def _worker_hourly(self, date_str, mode):
+    def _worker_hourly(self, date_str, mode, provider="deepseek"):
         try:
-            r = browser_sync.fetch_hourly(date_str, headless=True, timeout=60)
+            if provider == "openrouter":
+                r = openrouter_sync.fetch_openrouter_hourly(date_str, headless=True, timeout=60)
+            else:
+                r = browser_sync.fetch_hourly(date_str, headless=True, timeout=60)
         except Exception as e:
             r = {"ok": False, "error": f"{e.__class__.__name__}: {e}"}
         self.ui_queue.put(lambda rr=r, m=mode, ds=date_str: self._hourly_done(ds, m, rr))
 
     def _hourly_done(self, date_str, mode, result):
+        # 关闭对应的加载窗口
+        try:
+            if (getattr(self, "_hourly_loading_win", None) is not None
+                    and getattr(self, "_hourly_loading_meta", None) == (date_str, mode)):
+                self._hourly_loading_win.destroy()
+                self._hourly_loading_win = None
+        except Exception:  # noqa: BLE001
+            pass
         if not result.get("ok"):
             messagebox.showwarning("提示", result.get("error", "获取失败"), parent=self.root)
             return
@@ -1896,6 +2072,11 @@ class BalanceApp:
         if p == "siliconflow" and self.siliconflow_data and self.siliconflow_data.get("ok"):
             try:
                 return float(self.siliconflow_data["data"].get("balance", 0))
+            except (TypeError, ValueError):
+                pass
+        if p == "openrouter" and self.openrouter_data and self.openrouter_data.get("ok"):
+            try:
+                return float(self.openrouter_data["data"].get("balance", 0))
             except (TypeError, ValueError):
                 pass
         res = self.results.get(acc["id"])

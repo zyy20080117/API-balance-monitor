@@ -203,6 +203,7 @@ def _fetch_page_tokens(headless=True, timeout=60, max_age=300):
 
     tokens = None
     requests = None
+    models = None
     with _BROWSER_LOCK:
         try:
             with sync_playwright() as p:
@@ -221,20 +222,71 @@ def _fetch_page_tokens(headless=True, timeout=60, max_age=300):
                     mr = re.search(r"API 请求次数\s*\n?\s*([\d,]+)", text)
                     if mr:
                         requests = int(mr.group(1).replace(",", ""))
+                    # 各模型明细也从页面抓（总数与明细一致，避免与 amount 接口混用）
+                    models = _parse_page_models(text)
                 finally:
                     ctx.close()
         except Exception:
             pass
 
-    if tokens is not None or requests is not None:
+    if tokens is not None or requests is not None or models:
         try:
             os.makedirs(os.path.dirname(TOKEN_PAGE_CACHE), exist_ok=True)
             with open(TOKEN_PAGE_CACHE, "w", encoding="utf-8") as f:
-                json.dump({"tokens": tokens, "requests": requests,
+                json.dump({"tokens": tokens, "requests": requests, "models": models,
                            "ts": datetime.datetime.now().timestamp()}, f)
         except Exception:
             pass
     return tokens
+
+
+def _parse_page_models(text):
+    """从官方页面文本解析各模型的请求数与 Token。
+
+    页面结构（每模型一块）：
+        deepseek-v4-flash
+        API 请求次数
+        5,653
+        Tokens
+        1,515,509,670
+    返回 [{"model", "requests", "tokens"}, ...]；解析失败返回 []。
+    """
+    lines = [l.strip() for l in text.split("\n")]
+    out = []
+    for i, l in enumerate(lines):
+        if "deepseek" not in l.lower():
+            continue
+        if i + 1 >= len(lines) or lines[i + 1] != "API 请求次数":
+            continue
+        try:
+            req = int(lines[i + 2].replace(",", ""))
+        except (ValueError, IndexError):
+            continue
+        tok = 0
+        for j in range(i + 3, min(i + 8, len(lines))):
+            if lines[j] == "Tokens" and j + 1 < len(lines):
+                try:
+                    tok = int(lines[j + 1].replace(",", ""))
+                except (ValueError, IndexError):
+                    tok = 0
+                break
+        out.append({"model": l, "requests": req, "tokens": tok})
+    return out
+
+
+def _page_models_cached(max_age=None):
+    """读取官方页面模型明细缓存（权威口径），**不启动浏览器**。"""
+    try:
+        with open(TOKEN_PAGE_CACHE, encoding="utf-8") as f:
+            d = json.load(f)
+        val = d.get("models")
+        ts = d.get("ts", 0)
+        if val:
+            if max_age is None or (datetime.datetime.now().timestamp() - ts) < max_age:
+                return val
+    except Exception:
+        pass
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -290,6 +342,11 @@ def fetch_deepseek_usage(headless=True, timeout=60):
         page_requests = _page_requests_cached()
         if page_requests is not None:
             requests_total = page_requests
+        # 模型明细同样以官方页面为准，保证总数 = 明细合计（与官网一致）
+        page_models = _page_models_cached()
+        if page_models:
+            models = {m["model"]: {"requests": m["requests"], "tokens": m["tokens"]}
+                      for m in page_models}
 
         data = {
             "balance": f"{balance:.2f}" if balance is not None else "?",
