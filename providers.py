@@ -4,6 +4,8 @@
 import requests
 
 TIMEOUT = 15
+# OpenRouter 是国外站点，连接慢/不稳：用短超时快速失败，避免长时间「查询中」
+OR_TIMEOUT = 5
 
 
 class ProviderError(Exception):
@@ -14,12 +16,13 @@ class ProviderError(Exception):
 # 通用 HTTP 辅助
 # ---------------------------------------------------------------------------
 
-def _http_get(url, api_key):
+def _http_get(url, api_key, timeout=TIMEOUT):
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Accept": "application/json",
     }
-    return requests.get(url, headers=headers, timeout=TIMEOUT)
+    # 连接与读取均限时，避免连接挂起导致长时间等待
+    return requests.get(url, headers=headers, timeout=(timeout, timeout))
 
 
 def _http_err(r):
@@ -147,7 +150,7 @@ def check_siliconflow(api_key, base_url):
 def check_openrouter(api_key, base_url):
     url = f"{base_url.rstrip('/')}/credits"
     try:
-        r = _http_get(url, api_key)
+        r = _http_get(url, api_key, timeout=OR_TIMEOUT)
     except requests.RequestException as e:
         return _req_err(e)
     if not r.ok:

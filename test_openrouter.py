@@ -90,10 +90,31 @@ def test_parse_hourly():
     assert len(empty) == 24 and empty[0]["tokens"] == 0
 
 
+def test_openrouter_short_timeout():
+    """OpenRouter（国外站点）使用 5s 短超时，连接失败时快速返回，不长时间「查询中」。"""
+    import providers
+    import requests
+    calls = []
+    orig_get = requests.get
+
+    def fake_get(url, headers=None, timeout=None):
+        calls.append(timeout)
+        raise requests.ConnectionError("模拟连接超时")
+
+    requests.get = fake_get
+    try:
+        r = providers.check_openrouter("sk-test", "https://openrouter.ai/api/v1")
+        assert not r.get("ok"), r
+        assert calls and calls[0] == (5, 5), calls
+    finally:
+        requests.get = orig_get
+
+
 if __name__ == "__main__":
     test_parse_analytics()
     test_parse_analytics_missing_fields()
     test_fetch_usage_daily()
     test_fetch_usage_no_credits()
     test_parse_hourly()
+    test_openrouter_short_timeout()
     print("PASS: OpenRouter 同步逻辑测试通过")

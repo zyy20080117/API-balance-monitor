@@ -73,17 +73,23 @@ def button_img(width, height, radius=10, color=PRIMARY, press_color=PRIMARY_D):
     return n, p
 
 
-def aa_button_image(width, height, fill, inset=2, scale=3):
-    """抗锯齿圆角按钮图片：PIL 3x 超采样渲染后 LANCZOS 缩回原尺寸，
+def aa_button_image(width, height, fill, inset=2, scale=5, radius=None):
+    """抗锯齿圆角按钮图片：PIL 超采样渲染后 LANCZOS 缩回原尺寸，
     圆角边缘平滑无颗粒锯齿（Tk canvas 的 create_polygon 走 GDI，不抗锯齿）。
-    inset 保留原按钮 2px 内边距。"""
+    radius 指定圆角半径（像素，逻辑尺寸）；缺省为胶囊(高一半)。
+    小按钮(窄)用更小圆角使弧线平缓，放大查看与宽按钮视觉一致、不显颗粒。"""
     w, h, s = max(width, 1), max(height, 1), max(scale, 1)
+    if radius is None:
+        radius = (h - inset * 2) // 2
+    radius = max(1, radius)
     img = Image.new("RGBA", (w * s, h * s), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
-    r = max(1, (h - inset * 2) * s // 2)
+    r = radius * s
     d.rounded_rectangle(
         [inset * s, inset * s, w * s - inset * s - 1, h * s - inset * s - 1],
         radius=r, fill=fill)
+    # 先用双线性平滑过渡，再 LANCZOS 缩回，进一步柔化圆角边缘
+    img = img.resize((max(1, w * 2), max(1, h * 2)), Image.BILINEAR)
     img = img.resize((w, h), Image.LANCZOS)
     return ImageTk.PhotoImage(img)
 
@@ -103,9 +109,11 @@ class iOSButton:
         self.font_size = font_size
         self.cv = tk.Canvas(parent, width=width, height=height, highlightthickness=0,
                             bg=parent.cget("bg"))
+        # 圆角半径固定为胶囊形（高的一半），所有按钮统一成“添加账号”同款的圆滑药丸外轮廓
+        radius = (height - 4) // 2
         # 抗锯齿按钮背景图（普通 + 按压），替代 GDI 多边形避免圆角像素颗粒
-        self._imgs = {"normal": aa_button_image(width, height, color),
-                      "pressed": aa_button_image(width, height, self.press_color)}
+        self._imgs = {"normal": aa_button_image(width, height, color, radius=radius),
+                      "pressed": aa_button_image(width, height, self.press_color, radius=radius)}
         self._img_ref = self._imgs["normal"]   # 保存 PhotoImage 引用防回收
         self._label = None
         self._draw(self.color)
