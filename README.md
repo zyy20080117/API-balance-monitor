@@ -1,8 +1,16 @@
 # 大模型余额监控（API Balance Monitor）
 
+![Python](https://img.shields.io/badge/Python-3.8%2B-blue)
+![License](https://img.shields.io/github/license/zyy20080117/API-balance-monitor)
+![CI](https://img.shields.io/github/actions/workflow/status/zyy20080117/API-balance-monitor/build.yml)
+
 > 本项目使用 **MIT License** 开源，详见 [LICENSE](LICENSE)。
 
 一个 Windows / macOS / Linux 桌面应用，把多家大模型 API 的**账户余额**和**累计已消费金额**集中到一个界面统一查看，并提供每日用量日历、每小时 Token 分布、余额预警等能力。
+
+![主界面](assets/screenshots/main.png)
+
+![添加账号](assets/screenshots/add-account.png)
 
 ---
 
@@ -29,15 +37,58 @@
 - **自动刷新余额、自动同步官方**（浏览器抓取官方数据）
 - **开机自动同步官方数据**
 
+## 技术栈
+
+- **语言**：Python 3.8+
+- **桌面 GUI**：tkinter（Python 标准库）
+- **UI 组件**：自绘 iOS 风格圆角按钮 / 卡片（基于 Pillow 抗锯齿渲染）
+- **HTTP 请求**：requests
+- **浏览器自动化**：Playwright（驱动系统 Edge / Chromium，用于官方数据同步）
+- **数据存储**：本地 JSON（`~/.model_balance/`），API Key 使用 Windows DPAPI 加密
+- **打包**：PyInstaller
+- **持续集成**：GitHub Actions（Windows / macOS / Linux 三平台自动构建）
+
+## 系统要求
+
+- **Windows**：Windows 10 / 11（自带 Edge，无需额外安装浏览器）
+- **macOS**：macOS 10.15 及以上
+- **Linux**：主流发行版（需安装 `python3-tk`，见下文「从源码运行」）
+- **需要联网**：查询余额、同步官方数据均需访问服务商官网 / 接口
+
 ## 快速开始
 
-### 环境要求
+### 下载安装包（推荐给普通使用者）
 
-- Windows / macOS / Linux
-- Python 3.8+
-- 浏览器同步依赖本机 Chromium 内核（Windows 使用系统 Edge）
+安装包发布在 **GitHub Releases 页面**，无需安装 Python：
 
-### 从源码运行
+1. 打开 [Releases 页面](https://github.com/zyy20080117/API-balance-monitor/releases)
+2. 下载对应平台的安装包：
+   - **Windows**：`API-Balance-Monitor-windows-amd64.exe`
+   - **macOS**：`API-Balance-Monitor-macos`
+   - **Linux**：`API-Balance-Monitor-linux-amd64`
+3. 双击运行（macOS 首次打开需在「系统设置 → 隐私与安全性」允许来自未识别开发者；Windows 若被 SmartScreen 拦截，点「仍要运行」）
+
+> 安装包不包含在源码仓库中，仅发布在 GitHub Releases。
+
+### 添加你的第一个 API 账号
+
+1. 打开软件，点击「＋ 添加账号」
+2. 选择**服务商**（如 DeepSeek、Kimi、智谱、硅基流动、OpenRouter 等）
+3. 到该服务商官网的「API Key」页面复制 Key，粘贴到输入框
+4. 点击**保存**，余额会自动查询并显示
+
+> 智谱没有公开余额接口，还需在软件弹出的浏览器窗口里登录一次（点击「同步官方」时触发）。
+> 详细配置教程见 [DOCS.md](DOCS.md)。
+
+### 各平台运行注意事项
+
+- **Windows**：自带 Edge，开箱即用；若杀毒软件误报请参考 [docs/FAQ.md](docs/FAQ.md)
+- **macOS**：首次打开安装包需在系统设置允许运行
+- **Linux**：见下方「从源码运行」的 tkinter 说明
+
+### 从源码运行（开发者）
+
+需要 Python 3.8+：
 
 ```bash
 pip install -r requirements.txt
@@ -45,24 +96,32 @@ python main.py
 ```
 
 > 依赖：`tkinter`、`PIL(Pillow)`、`requests`、`playwright`
+>
+> **Linux 用户**：运行前需先安装 tkinter——
+> ```bash
+> sudo apt install python3-tk
+> ```
 
-### 使用步骤
+运行全部测试：
 
-1. 点击「＋ 添加账号」，选择服务商，填入该平台的 **API Key**（智谱还需在软件弹出的浏览器里登录一次）
-2. 余额会自动通过 HTTP 接口查询；点击「同步官方」可获取浏览器侧的官方数据（消费 / 每日用量）
-3. 在「主账号」里选择一个账号，每日用量 / 预警设置将跟随它
+```bash
+python run_tests.py
+```
 
-详细配置教程、参数说明与故障排错见 [DOCS.md](DOCS.md)。
-
-### 打包安装包
-
-安装包（Windows exe / macOS / Linux）不提交到源码仓库，发布在 **GitHub Releases** 页面。需要打包可运行：
+打包安装包（多平台自动构建见 [.github/workflows/build.yml](.github/workflows/build.yml)）：
 
 ```bash
 pyinstaller ModelBalance.spec --noconfirm
 ```
 
-多平台自动构建见 [.github/workflows/build.yml](.github/workflows/build.yml)。
+详细配置教程、参数说明与故障排错见 [DOCS.md](DOCS.md)。
+
+## 数据安全
+
+- **API Key 只保存在本地**：存储在 `~/.model_balance/accounts.json`，**Windows 下使用 DPAPI（当前系统用户绑定）加密**
+- **不会上传到任何第三方服务器**：所有请求仅发往各服务商官方接口
+- **浏览器登录态也只保存在本地**：`~/.model_balance/browser_profile`，用于同步官方数据
+- **开源可自行审计**：全部源码公开，可核对数据存储与网络行为
 
 ## 已知限制
 
@@ -88,7 +147,9 @@ pyinstaller ModelBalance.spec --noconfirm
 编码规范：
 - 遵循现有代码风格（Python 3，中文注释）
 - 每个新增服务商同步模块放在独立文件（如 `xxx_sync.py`），并在 `providers.py` 注册
-- 合并前需通过现有测试：`python test_*.py`
+- 合并前需通过全部测试：`python run_tests.py`
+
+完整的开发环境搭建、服务商接入流程见 [CONTRIBUTING.md](CONTRIBUTING.md)，架构说明见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
 
 ## 开源协议
 
