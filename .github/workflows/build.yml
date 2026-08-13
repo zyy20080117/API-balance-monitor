@@ -1,0 +1,91 @@
+name: Build Release
+
+# 触发：推送 v* 标签（如 v0.0.1）或手动运行
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build on ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Linux tkinter
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-tk
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build with PyInstaller
+        run: pyinstaller ModelBalance.spec --noconfirm
+
+      - name: Rename artifact
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            mv dist/ModelBalance.exe dist/API-Balance-Monitor-windows-amd64.exe
+          elif [ "$RUNNER_OS" = "macOS" ]; then
+            mv dist/ModelBalance dist/API-Balance-Monitor-macos
+          else
+            mv dist/ModelBalance dist/API-Balance-Monitor-linux-amd64
+          fi
+        env:
+          RUNNER_OS: ${{ runner.os }}
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-${{ matrix.os }}
+          path: dist/*
+
+  release:
+    name: Publish Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create / Update Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          body: |
+            ## v0.0.1
+
+            ### 更新说明
+            - 首个正式发布版本
+            - 支持 DeepSeek / Kimi / 智谱 / 硅基流动 / OpenRouter / 通用中转站 余额监控
+            - 每日用量日历、每小时 Token 分布、余额预警、多账号管理
+
+            ### 安装包
+            - Windows: `API-Balance-Monitor-windows-amd64.exe`
+            - macOS: `API-Balance-Monitor-macos`
+            - Linux: `API-Balance-Monitor-linux-amd64`
+
+            > 安装包不包含在源码仓库中，仅发布在 GitHub Releases。

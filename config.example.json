@@ -1,0 +1,21 @@
+{
+  "说明": "这是配置示例模板（config.example.json），仅用于了解配置结构。软件实际运行配置默认存储在用户目录 ~/.model_balance/ 下（accounts.json、settings.json），无需在项目内创建 config.json。真实配置 config.json 会被 .gitignore 过滤、不上传 Git。",
+  "accounts": [
+    {
+      "provider": "deepseek",
+      "name": "示例账号",
+      "api_key": "sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "base_url": "https://api.deepseek.com"
+    }
+  ],
+  "settings": {
+    "auto_refresh": false,
+    "auto_minutes": 10,
+    "auto_sync": false,
+    "auto_sync_minutes": 30,
+    "master_account_id": "",
+    "master_api_name": "",
+    "alerts": {},
+    "sort_mode": ""
+  }
+}
