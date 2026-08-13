@@ -28,7 +28,11 @@ def main():
              "api_key": "sk-test-12345", "base_url": ""}]
     storage.save_accounts(accs)
     loaded = storage.load_accounts()
-    assert loaded == accs, f"存储往返不一致: {loaded}"
+    # 保存时会补 created_at，比较关键字段
+    assert loaded and loaded[0]["id"] == accs[0]["id"]
+    assert loaded[0]["api_key"] == accs[0]["api_key"]
+    assert loaded[0]["provider"] == accs[0]["provider"]
+    assert loaded[0]["name"] == accs[0]["name"]
     os.remove(storage.CONFIG_PATH)
     storage.CONFIG_PATH = backup
     print("[OK] 存储加密/解密往返正常")

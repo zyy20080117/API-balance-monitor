@@ -105,15 +105,21 @@ def _parse_kimi_daily(data):
             continue
         date = (it.get("date") or it.get("day") or it.get("bill_date") or it.get("time")
                 or it.get("dateStr") or it.get("consumption_date"))
-        cost = (it.get("cost")
-                if it.get("cost") is not None else
-                it.get("amount")
-                if it.get("amount") is not None else
-                it.get("consume")
-                if it.get("consume") is not None else
-                it.get("total_amount")
-                if it.get("total_amount") is not None else
-                it.get("money"))
+        # Kimi 日账单字段：voucher_fee(代金券) + recharge_fee(充值) 为当日消费
+        voucher = it.get("voucher_fee")
+        recharge = it.get("recharge_fee")
+        if voucher is not None or recharge is not None:
+            cost = (voucher or 0) + (recharge or 0)
+        else:
+            cost = (it.get("cost")
+                    if it.get("cost") is not None else
+                    it.get("amount")
+                    if it.get("amount") is not None else
+                    it.get("consume")
+                    if it.get("consume") is not None else
+                    it.get("total_amount")
+                    if it.get("total_amount") is not None else
+                    it.get("money"))
         try:
             cost_f = float(cost) / 100000.0 if cost is not None else 0.0
         except (TypeError, ValueError):
@@ -174,7 +180,11 @@ def fetch_kimi_usage_daily(headless=True, timeout=60):
                 page.on("response", _on_resp)
                 page.on("request", _on_req)
                 page.goto(KIMI_URL, timeout=timeout * 1000)
-                page.wait_for_timeout(6000)
+                # 条件等待：账户接口响应到了立即继续，避免固定等 6 秒拖慢加载
+                for _ in range(int(timeout) * 2):
+                    page.wait_for_timeout(250)
+                    if info["use"] is not None and info["oid"] and info["tok"]:
+                        break
 
                 if info["oid"] and info["tok"]:
                     result["daily"] = _fetch_kimi_daily_via(page, info["oid"], info["tok"], timeout)

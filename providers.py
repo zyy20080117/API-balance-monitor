@@ -198,26 +198,33 @@ def check_zhipu(api_key, base_url):
 
 
 def check_relay(api_key, base_url):
-    """通用 OpenAI 兼容中转站（new-api / one-api 等）。
+    """通用 OpenAI 兼容中转站（new-api / one-api / OpenAI 官方等）。
 
-    依次尝试常见的余额接口路径，取第一个成功的。
+    依次尝试常见余额接口路径，取第一个成功解析的；全程 HTTP，无需浏览器登录。
     """
     base = base_url.rstrip("/") or "https://api.openai.com"
     candidates = [
-        f"{base}/v1/dashboard/billing/credit_grants",
-        f"{base}/dashboard/billing/credit_grants",
-        f"{base}/v1/user/balance",
+        "/v1/dashboard/billing/credit_grants",  # OpenAI 官方/部分中转
+        "/dashboard/billing/credit_grants",
+        "/v1/user/balance",                     # new-api / one-api 常见
+        "/api/user/self",                       # new-api / one-api（quota）
+        "/api/user/balance",
+        "/api/balance",
+        "/api/user/info",
+        "/v1/dashboard/billing/subscription",
     ]
     last_err = None
-    for url in candidates:
+    for path in candidates:
         try:
-            r = _http_get(url, api_key)
+            r = _http_get(base + path, api_key)
         except requests.RequestException as e:
             last_err = _req_err(e)
             continue
-        if r.status_code in (401, 403):
-            # Key 无效，不用再试其它路径
+        if r.status_code == 401:
+            # 认证失败：Key 无效，不再试
             return _http_err(r)
+        if r.status_code == 403:
+            continue   # 该路径无权限，试其它路径
         if not r.ok:
             last_err = _http_err(r)
             continue
@@ -225,31 +232,58 @@ def check_relay(api_key, base_url):
         if not jr["ok"]:
             last_err = jr
             continue
-        j = jr["data"]
-        # OpenAI 计费端点格式
-        avail = j.get("total_available")
-        granted = j.get("total_granted")
-        used = j.get("total_used")
-        if avail is None and granted is not None and used is not None:
-            avail = _num(granted) - _num(used) if _num(granted) is not None and _num(used) is not None else None
-        if avail is not None:
-            lines = []
-            if granted is not None:
-                lines.append(f"总额度：{granted}")
-            if used is not None:
-                lines.append(f"已使用：{used}")
-            return {"ok": True, "value": avail, "unit": "", "lines": lines, "badge": "中转站"}
-        # 某些站点用 {"balance": ..., "currency": ...}
-        if j.get("balance") is not None:
-            return {
-                "ok": True,
-                "value": j.get("balance"),
-                "unit": j.get("currency") or "",
-                "lines": [],
-                "badge": "中转站",
-            }
-        last_err = {"ok": False, "error": f"未解析到余额：{str(j)[:120]}"}
+        res = _parse_relay_balance(jr["data"])
+        if res:
+            return res
+        last_err = {"ok": False, "error": f"未解析到余额：{str(jr['data'])[:120]}"}
     return last_err or {"ok": False, "error": "所有接口路径都失败了"}
+
+
+def _parse_relay_balance(j):
+    """从各中转站余额接口响应解析余额。兼容 OpenAI / new-api / one-api / 通用格式。"""
+    # 1) OpenAI 计费端点格式：total_available / total_granted / total_used
+    avail = j.get("total_available")
+    granted = j.get("total_granted")
+    used = j.get("total_used")
+    avail_f = _num(avail)
+    granted_f = _num(granted)
+    used_f = _num(used)
+    if avail_f is None and granted_f is not None and used_f is not None:
+        avail_f = granted_f - used_f
+    if avail_f is not None:
+        lines = []
+        if granted_f is not None:
+            lines.append(f"总额度：{granted_f:.2f}")
+        if used_f is not None:
+            lines.append(f"已使用：{used_f:.2f}")
+        return {"ok": True, "value": avail_f, "unit": "USD", "lines": lines, "badge": "中转站"}
+
+    # 2) new-api / one-api：/api/user/self 的 data.quota（1 quota = 1/500000 USD）
+    data = j.get("data") if isinstance(j, dict) else None
+    if isinstance(data, dict):
+        quota = _num(data.get("quota"))
+        if quota is not None:
+            lines = []
+            used_q = _num(data.get("used_quota"))
+            if used_q is not None:
+                lines.append(f"已使用：{used_q / 500000.0:.2f} USD")
+            return {"ok": True, "value": quota / 500000.0, "unit": "USD",
+                    "lines": lines, "badge": "中转站"}
+
+    # 3) 通用 balance 字段（balance / available / remaining 等）
+    for container in (j, data):
+        if not isinstance(container, dict):
+            continue
+        for key in ("balance", "available_balance", "available", "remaining",
+                    "amount", "points", "balance_remaining"):
+            v = container.get(key)
+            if v is not None:
+                v_f = _num(v)
+                if v_f is not None:
+                    return {"ok": True, "value": v_f,
+                            "unit": container.get("currency") or "",
+                            "lines": [], "badge": "中转站"}
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -294,7 +328,7 @@ PROVIDERS = [
     },
     {
         "id": "relay",
-        "name": "通用中转站（OpenAI 兼容）",
+        "name": "通用中转站",
         "default_base": "",
         "hint": "填写中转站地址，如 https://api.xxx.com",
         "check": check_relay,

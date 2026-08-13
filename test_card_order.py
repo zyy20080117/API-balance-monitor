@@ -47,6 +47,9 @@ def test_update_card_keeps_order():
     try:
         app = gui.BalanceApp.__new__(gui.BalanceApp)
         app.accounts = [{"id": "a"}, {"id": "b"}, {"id": "c"}]
+        app.root = root
+        app.canvas = tk.Canvas(root)
+        app.canvas.pack()
         app.list_frame = tk.Frame(root)
         app.list_frame.pack()
 
@@ -67,10 +70,12 @@ def test_update_card_keeps_order():
         assert order == ["a", "b", "c"], order
         # 更新中间的 b：重建后插回原位，顺序保持 a, b, c
         app._update_card("b")
+        app._flush_card_updates()   # 去抖：立即执行重建
         order2 = [getattr(c, "_acc_id", None) for c in app.list_frame.pack_slaves()]
         assert order2 == ["a", "b", "c"], order2
         # 更新末尾的 c：仍保持
         app._update_card("c")
+        app._flush_card_updates()
         order3 = [getattr(c, "_acc_id", None) for c in app.list_frame.pack_slaves()]
         assert order3 == ["a", "b", "c"], order3
         print("PASS: _update_card before 插回保持顺序")

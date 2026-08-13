@@ -359,7 +359,34 @@ class BalanceApp:
             pass
 
     def _update_card(self, acc_id):
-        """只重建某一张账号卡片，避免同步/刷新时整屏闪烁。"""
+        """只重建某一张账号卡片，避免同步/刷新时整屏闪烁。
+        去抖：250ms 内的多次更新合并为一次重建，减少主界面频繁闪烁
+        （每日用量界面 _render_calendar 的更新不在此列）。"""
+        jobs = getattr(self, "_update_jobs", None)
+        if jobs is None:
+            self._update_jobs = jobs = {}
+        jobs[acc_id] = True
+        if getattr(self, "_update_timer", False):
+            return
+        self._update_timer = True
+        self.root.after(250, self._flush_card_updates)
+
+    def _flush_card_updates(self):
+        self._update_timer = False
+        jobs = getattr(self, "_update_jobs", {})
+        self._update_jobs = {}
+        for acc_id in jobs:
+            try:
+                self._update_card_now(acc_id)
+            except Exception:  # noqa: BLE001
+                pass
+
+    def _update_card_now(self, acc_id):
+        """实际重建单张卡片（去抖后的统一执行）。"""
+        try:
+            ypos = self.canvas.yview()[0]   # 记住滚动位置，重建后恢复，避免主界面抖动闪烁
+        except Exception:  # noqa: BLE001
+            ypos = None
         for child in self.list_frame.winfo_children():
             if getattr(child, "_acc_id", None) == acc_id:
                 child.destroy()
@@ -380,6 +407,11 @@ class BalanceApp:
                 card = self._make_card(acc, before=before)
                 self._bind_card_scroll(card)   # 新卡补绑滚轮，避免停在该卡上无法滚动
                 break
+        if ypos is not None:
+            try:
+                self.canvas.yview_moveto(ypos)
+            except Exception:  # noqa: BLE001
+                pass
 
     def _bind_card_scroll(self, card):
         """给一张卡片及其所有子控件绑定滚轮（重建后的新卡不会自动继承滚动绑定）。"""
@@ -805,6 +837,13 @@ class BalanceApp:
                 and self.openrouter_data is None
                 and not getattr(self, "_openrouter_syncing", False)):
             threading.Thread(target=self._worker_openrouter_sync, daemon=True).start()
+        # DeepSeek 自动同步官方（已消费金额等只能从官方页面拿），每次打开软件自动同步一次
+        if (any(a.get("provider") == "deepseek" for a in self.accounts)
+                and getattr(self, "official_data", None) is None
+                and not getattr(self, "_syncing", False)
+                and not getattr(self, "_ds_syncing", False)):
+            self._ds_syncing = True
+            threading.Thread(target=self._worker_deepseek_sync, daemon=True).start()
         self._check_alert()
         # 开机网络未就绪：有网络错误账号时延迟自动重试（最多 3 次），避免一开机全是红叉
         if any(self._is_network_error(self.results.get(a["id"])) for a in self.accounts):
@@ -995,6 +1034,25 @@ class BalanceApp:
             o = {"ok": False, "error": f"{e.__class__.__name__}: {e}"}
         self.ui_queue.put(lambda oo=o, dd=daily: self._finish_openrouter(oo, dd))
 
+    def _worker_deepseek_sync(self):
+        """DeepSeek 自动同步官方（余额/已消费/逐日），每次打开软件自动同步一次。"""
+        out = {}
+        try:
+            # 浏览器 profile 全局串行：与 Kimi/智谱等不能同时开浏览器
+            with browser_sync._BROWSER_LOCK:
+                out["usage"] = browser_sync.fetch_deepseek_usage(headless=True, timeout=90)
+                try:
+                    d = browser_sync.fetch_deepseek_daily(headless=True, timeout=60)
+                    out["daily"] = d.get("data") if d.get("ok") else None
+                except Exception:  # noqa: BLE001
+                    out["daily"] = None
+        except Exception as e:  # noqa: BLE001
+            out["usage"] = {"ok": False, "error": f"{e.__class__.__name__}: {e}"}
+        r = out.get("usage") or {"ok": False, "error": "同步失败"}
+        if r.get("ok"):
+            threading.Thread(target=self._refresh_page_tokens_bg, args=(r,), daemon=True).start()
+        self.ui_queue.put(lambda rr=r, dd=out.get("daily"): self._finish_sync(rr, dd))
+
     def _finish_openrouter(self, o, daily=None):
         self._openrouter_syncing = False
         self.openrouter_data = o
@@ -1039,6 +1097,7 @@ class BalanceApp:
                     pass
 
     def _finish_sync(self, result, daily=None):
+        self._ds_syncing = False   # DeepSeek 自动同步完成标记
         if isinstance(result, dict):
             result["synced_at"] = time.time()   # 记录同步时刻，让数据透明（官网是实时的）
         self.official_data = result
@@ -1310,9 +1369,9 @@ class BalanceApp:
     def show_daily(self):
         """每日用量统一为日历形式：不管主账号是哪家，界面都与 DeepSeek 主账号一致。
         数据按主账号过滤。Kimi 主账号若无每日账单，后台同步一次（不阻塞显示）。"""
-        if not self.daily_data:
-            if not self._load_daily_cache():
-                self._ensure_daily_sync()
+        # 总是先从缓存加载每日用量（含 Kimi 等已同步记录），立即显示，避免开浏览器等很久
+        if not self._load_daily_cache():
+            self._ensure_daily_sync()
         master = self._get_master()
         if master and master.get("provider") == "moonshot":
             has_kd = any(r.get("provider") == "moonshot" for r in (self.daily_data or []))
