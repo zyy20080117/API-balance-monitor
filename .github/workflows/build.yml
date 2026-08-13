@@ -76,12 +76,14 @@ jobs:
         with:
           files: artifacts/*
           body: |
-            ## v0.0.1
+            ## v0.0.2
 
             ### 更新说明
-            - 首个正式发布版本
-            - 支持 DeepSeek / Kimi / 智谱 / 硅基流动 / OpenRouter / 通用中转站 余额监控
-            - 每日用量日历、每小时 Token 分布、余额预警、多账号管理
+            - 修复：每日用量缓存被 DeepSeek 同步覆盖丢失，Kimi 等平台历史记录不再丢失
+            - 修复：Kimi 每日用量打开时缓存优先，不再每次都等慢的浏览器同步
+            - 优化：初始界面闪烁（卡片更新去抖合并、列表重建减少闪烁帧）
+            - 新增：程序崩溃弹窗显示错误信息并写日志，不再闪退
+            - 新增：统一测试入口 run_tests.py；开源文档体系（贡献指南/架构/FAQ/变更日志/Issue-PR 模板/截图/徽章）
 
             ### 安装包
             - Windows: `API-Balance-Monitor-windows-amd64.exe`
@@ -89,3 +91,4 @@ jobs:
             - Linux: `API-Balance-Monitor-linux-amd64`
 
             > 安装包不包含在源码仓库中，仅发布在 GitHub Releases。
+            > 完整变更见 CHANGELOG.md
