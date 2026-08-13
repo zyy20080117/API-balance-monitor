@@ -22,7 +22,7 @@
 
 - **支持接入以下大模型服务商**，统一监控账户余额与累计消费：
   - DeepSeek
-  - Kimi（Moonshot）
+  - Kimi
   - 智谱 GLM（BigModel）
   - 硅基流动（SiliconFlow）
   - OpenRouter
