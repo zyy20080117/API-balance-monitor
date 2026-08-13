@@ -73,11 +73,11 @@ def button_img(width, height, radius=10, color=PRIMARY, press_color=PRIMARY_D):
     return n, p
 
 
-def aa_button_image(width, height, fill, inset=2, scale=5, radius=None):
-    """抗锯齿圆角按钮图片：PIL 超采样渲染后 LANCZOS 缩回原尺寸，
+def aa_button_image(width, height, fill, inset=2, scale=8, radius=None):
+    """抗锯齿圆角按钮图片：PIL 高倍超采样渲染后单次 LANCZOS 缩回原尺寸，
     圆角边缘平滑无颗粒锯齿（Tk canvas 的 create_polygon 走 GDI，不抗锯齿）。
     radius 指定圆角半径（像素，逻辑尺寸）；缺省为胶囊(高一半)。
-    小按钮(窄)用更小圆角使弧线平缓，放大查看与宽按钮视觉一致、不显颗粒。"""
+    scale=8 高倍超采样，确保窄按钮和宽按钮圆角同样细腻。"""
     w, h, s = max(width, 1), max(height, 1), max(scale, 1)
     if radius is None:
         radius = (h - inset * 2) // 2
@@ -88,8 +88,7 @@ def aa_button_image(width, height, fill, inset=2, scale=5, radius=None):
     d.rounded_rectangle(
         [inset * s, inset * s, w * s - inset * s - 1, h * s - inset * s - 1],
         radius=r, fill=fill)
-    # 先用双线性平滑过渡，再 LANCZOS 缩回，进一步柔化圆角边缘
-    img = img.resize((max(1, w * 2), max(1, h * 2)), Image.BILINEAR)
+    # 高倍超采样后单次 LANCZOS 缩回，圆角边缘最平滑、无中间缩放造成的模糊带
     img = img.resize((w, h), Image.LANCZOS)
     return ImageTk.PhotoImage(img)
 
@@ -125,21 +124,18 @@ class iOSButton:
         img = self._imgs["pressed"] if fill == self.press_color else self._imgs["normal"]
         self._img_ref = img
         self.cv.create_image(self.width // 2, self.height // 2, image=img)
-        # 文本用 Label（自动适配、可靠渲染，不裁剪）；字号自适应按钮宽度
+        # 文本直接用 create_text（无背景矩形），避免 Label 直角矩形覆盖圆角边缘导致窄按钮外轮廓被“切平”
         fs = self.font_size
         f = tkfont.Font(family=_FONT, size=fs, weight="bold")
         while f.measure(self.text) > (self.width - 22) and fs > 7:
             fs -= 1
             f = tkfont.Font(family=_FONT, size=fs, weight="bold")
-        if self._label is None:
-            self._label = tk.Label(self.cv, text=self.text, bg=fill, fg=self.fg,
-                                   font=(_FONT, fs, "bold"))
-            self._label.bind("<Button-1>", self._on_press)
-            self._label.bind("<ButtonRelease-1>", self._on_release)
-        else:
-            self._label.config(text=self.text, bg=fill, fg=self.fg,
-                               font=(_FONT, fs, "bold"))
-        self.cv.create_window(self.width // 2, self.height // 2, window=self._label)
+        self.cv.create_text(self.width // 2, self.height // 2,
+                            text=self.text, fill=self.fg,
+                            font=(_FONT, fs, "bold"),
+                            anchor="center", justify="center")
+        # _label 字段保留以兼容旧引用（不再使用）
+        self._label = None
 
     def _on_press(self, _e):
         self._draw(self.press_color)

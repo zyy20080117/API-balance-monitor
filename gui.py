@@ -1893,7 +1893,7 @@ class BalanceApp:
         mname = master.get("name") or _provider_id_to_name(master.get("provider"))
         win = tk.Toplevel(self.root)
         win.title("费用预警设置")
-        win.geometry("360x200")
+        win.geometry("360x250")
         win.configure(bg=COLOR_BG)
         win.resizable(False, False)
         tk.Label(win, text=f"主账号：{mname}\n余额低于多少元时提醒？\n(填 0 或留空 = 关闭预警)",
