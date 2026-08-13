@@ -137,6 +137,8 @@ class BalanceApp:
         self.results = {}
         self.official_data = None
         self.daily_data = None
+        # 启动即加载每日用量缓存（含各平台历史记录），避免后续同步覆盖丢失其他平台数据
+        self._load_daily_cache()
         # Kimi 浏览器同步结果（已消费/余额）：优先读缓存，启动即有数据显示，避免冷启动等待
         self.kimi_data = self._load_kimi_cache()
         # 智谱浏览器同步结果：同样优先读缓存
@@ -1102,8 +1104,8 @@ class BalanceApp:
             result["synced_at"] = time.time()   # 记录同步时刻，让数据透明（官网是实时的）
         self.official_data = result
         if daily is not None:
-            self.daily_data = daily
-            self._save_daily_cache()
+            # 合并进 daily_data（保留其他平台记录），避免覆盖丢失 Kimi 等历史数据
+            self._merge_daily(daily)
         # 同步完成只重建受影响卡片（DeepSeek/Kimi 局部更新），避免整屏闪烁
         for acc in self.accounts:
             if acc.get("provider") in ("deepseek", "moonshot"):
@@ -1418,6 +1420,9 @@ class BalanceApp:
         """把一批逐日记录合并进 daily_data（按 provider+name+date 去重），并落盘。"""
         if not records:
             return
+        # 若当前无内存数据，先从缓存加载，避免合并后覆盖丢失其他平台的历史记录
+        if not self.daily_data:
+            self._load_daily_cache()
 
         def _key(r):
             return (r.get("provider") or "deepseek", r.get("name") or "", r["date"])

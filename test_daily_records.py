@@ -21,6 +21,7 @@ def make_app():
     ]
     app.daily_data = []
     app._save_daily_cache = lambda: None
+    app._load_daily_cache = lambda: False   # 测试隔离：不加载真实缓存
     app._master_id = ""
     app._master_api = ""
     return app
