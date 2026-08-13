@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
 """Kimi 累计消费计算测试：累计消费 = 充值+赠送-当前余额（use 只统计现金不准），
 且「累计消费 + 当前余额 = 代金券/充值总额」应恒成立。mock 浏览器。"""
+import os
 import sys
 
-sys.path.insert(0, r"c:/Users/13404/model_balance_app")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import kimi_sync  # noqa: E402
 
 # 金额单位：接口返回 1e-5 元

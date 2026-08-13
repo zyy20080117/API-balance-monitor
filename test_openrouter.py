@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 """OpenRouter 同步逻辑测试：analytics 解析 + 余额 HTTP + 组装。不启动浏览器。"""
+import os
 import sys
 
-sys.path.insert(0, r"c:/Users/13404/model_balance_app")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import openrouter_sync  # noqa: E402
 
 
