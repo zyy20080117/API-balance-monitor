@@ -335,6 +335,11 @@ class BalanceApp:
             ypos = self.canvas.yview()[0]   # 记住滚动位置，重建后恢复，避免跳回顶部
         except Exception:  # noqa: BLE001
             ypos = 0.0
+        # 先处理待绘制，再一次性销毁+重建，减少整屏重建时的闪烁帧
+        try:
+            self.root.update_idletasks()
+        except Exception:  # noqa: BLE001
+            pass
         for w in self.list_frame.winfo_children():
             w.destroy()
         if not self.accounts:
@@ -362,7 +367,7 @@ class BalanceApp:
 
     def _update_card(self, acc_id):
         """只重建某一张账号卡片，避免同步/刷新时整屏闪烁。
-        去抖：250ms 内的多次更新合并为一次重建，减少主界面频繁闪烁
+        去抖：350ms 内的多次更新合并为一次重建，减少主界面频繁闪烁
         （每日用量界面 _render_calendar 的更新不在此列）。"""
         jobs = getattr(self, "_update_jobs", None)
         if jobs is None:
@@ -371,7 +376,7 @@ class BalanceApp:
         if getattr(self, "_update_timer", False):
             return
         self._update_timer = True
-        self.root.after(250, self._flush_card_updates)
+        self.root.after(350, self._flush_card_updates)
 
     def _flush_card_updates(self):
         self._update_timer = False
