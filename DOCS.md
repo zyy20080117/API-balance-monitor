@@ -93,4 +93,4 @@
 ## 四、开发
 
 - 新增服务商：在 `providers.py` 注册（`PROVIDERS`），余额接口实现 `check_xxx`；每日用量浏览器同步放在独立 `xxx_sync.py`，并在 `gui.py` 接入（参考现有 `kimi_sync.py` / `siliconflow_sync.py` 等）。
-- 测试：`python test_*.py`（每个模块有对应测试文件）。
+- 测试：`python run_tests.py`（自动发现 `tests/test_*.py`，每个模块有对应测试文件）。

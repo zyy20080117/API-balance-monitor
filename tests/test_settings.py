@@ -1,5 +1,9 @@
 # -*- coding: utf-8 -*-
 """自动刷新/自动同步时间设置逻辑测试：手动输入解析 + 1~120 上限。不启动 GUI。"""
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import gui  # noqa: E402
 
 

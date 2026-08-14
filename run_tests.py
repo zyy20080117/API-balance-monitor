@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""统一测试入口：自动发现并运行所有 test_*.py。
+"""统一测试入口：自动发现并运行 tests/ 目录下所有 test_*.py。
 
 用法：
     python run_tests.py
@@ -12,12 +12,18 @@ import os
 import subprocess
 import sys
 
+# 管道输出时 Windows 控制台可能是 GBK，无法编码 ▶/✓ 等字符，避免崩溃改用占位符
+if sys.stdout and hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(errors="replace")
+if sys.stderr and hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(errors="replace")
+
 
 def main():
     here = os.path.dirname(os.path.abspath(__file__))
-    tests = sorted(glob.glob(os.path.join(here, "test_*.py")))
+    tests = sorted(glob.glob(os.path.join(here, "tests", "test_*.py")))
     if not tests:
-        print("未找到任何 test_*.py")
+        print("未找到任何 tests/test_*.py")
         return 1
 
     passed = []

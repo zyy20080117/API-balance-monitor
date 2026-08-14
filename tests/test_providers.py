@@ -1,8 +1,11 @@
 # -*- coding: utf-8 -*-
 """语法 / 逻辑自测：不联网的部分直接跑，联网部分打印结果供人工判断。"""
+import os
+import sys
 
 import importlib
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import providers
 import storage
 

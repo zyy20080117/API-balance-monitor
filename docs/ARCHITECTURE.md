@@ -23,7 +23,7 @@ API-balance-monitor/
 ├── self_check.py            # 自检脚本（调试用）
 ├── requirements.txt         # 依赖清单（含版本范围）
 ├── run_tests.py             # 统一测试入口
-├── test_*.py                # 各模块单元测试（mock，不联网）
+├── tests/                   # 单元测试（test_*.py，mock，不联网）
 ├── ModelBalance.spec        # PyInstaller 打包配置
 └── assets/                  # 图标与截图（离线资源）
 ```

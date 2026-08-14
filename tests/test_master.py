@@ -1,6 +1,9 @@
 # -*- coding: utf-8 -*-
 """主账号功能（需求4）逻辑测试：不启动 GUI、不发网络请求。"""
+import os
+import sys
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import gui
 
 

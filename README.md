@@ -140,7 +140,7 @@ pyinstaller ModelBalance.spec --noconfirm
 欢迎任何形式的贡献：提交 Issue、完善文档、修复 Bug、新增服务商支持。
 
 1. **Fork** 本仓库，并新建分支（`feature/xxx` 或 `fix/xxx`）
-2. 修改代码，补充/更新测试（`test_*.py`）
+2. 修改代码，补充/更新测试（`tests/test_*.py`）
 3. 提交并推送分支，然后创建 **Pull Request**
 4. 说明改动内容与测试结果
 

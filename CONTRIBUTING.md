@@ -26,11 +26,11 @@
 python run_tests.py
 ```
 
-该脚本会自动发现并执行所有 `test_*.py`，输出每个测试的通过/失败与汇总统计。
+该脚本会自动发现并执行 `tests/` 下所有 `test_*.py`，输出每个测试的通过/失败与汇总统计。
 
 也可以单独运行某个测试：
 ```bash
-python test_master.py
+python tests/test_master.py
 ```
 
 > 测试均为 mock 方式，不访问真实网络 / 不启动浏览器，可在无网络环境运行。
@@ -64,7 +64,7 @@ python test_master.py
    - 浏览器同步必须使用 `browser_sync._BROWSER_LOCK` 串行（所有平台共用同一浏览器 profile）
 
 3. **编写测试**
-   - 新建 `test_foo.py`，用 mock 覆盖余额解析 / 每日用量解析 / 异常场景
+   - 在 `tests/` 下新建 `test_foo.py`，用 mock 覆盖余额解析 / 每日用量解析 / 异常场景
    - 测试**不要**访问真实网络或启动浏览器
 
 4. **更新文档**

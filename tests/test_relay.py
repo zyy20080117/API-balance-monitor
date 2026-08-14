@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 """通用中转站余额查询测试：兼容 OpenAI / new-api(quota) / 通用 balance 格式。mock HTTP。"""
+import os
 import sys
 
-sys.path.insert(0, r"c:/Users/13404/model_balance_app")
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import providers  # noqa: E402
 
 

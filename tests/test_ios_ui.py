@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
 """iOS 按钮抗锯齿质量测试：圆角边缘应平滑过渡（无锯齿跳变）。
 scale 越高超采样越密，小按钮圆角越平滑。"""
+import os
 import sys
 
-sys.path.insert(0, r"c:/Users/13404/model_balance_app")
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from PIL import Image, ImageDraw  # noqa: E402
 
 
@@ -41,7 +42,7 @@ def test_small_button_smooth():
         img = render_button(w, h, scale=5)
         n = edge_steps(img)
         assert n >= 4, f"按钮 {w}x{h} 边缘过渡仅 {n} 级（锯齿）"
-        print(f"  {w}x{h}: 边缘过渡 {n} 级 ✓")
+        print(f"  {w}x{h}: 边缘过渡 {n} 级 [OK]")
 
 
 def test_higher_scale_smoother():

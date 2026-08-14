@@ -1,5 +1,9 @@
 # -*- coding: utf-8 -*-
 """DeepSeek 请求次数修复测试：请求次数/Token 以官方页面统计卡为准（amount 接口偏少）。"""
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import browser_sync  # noqa: E402
 
 

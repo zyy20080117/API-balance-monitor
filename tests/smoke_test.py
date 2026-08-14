@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
 """GUI 冒烟测试：启动界面，3 秒后自动关闭。若 3 秒内无异常即通过。"""
-
+import os
 import sys
 import threading
 import tkinter as tk
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import gui
 import providers
 import storage

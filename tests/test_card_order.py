@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
 """卡片顺序保持测试：_update_card 重建单卡后 _reorder_cards 恢复 accounts 顺序，
 修复「同步官方时卡片莫名乱跳」的根因（_make_card 会把新卡 pack 到末尾）。"""
+import os
 import sys
 
-sys.path.insert(0, r"c:/Users/13404/model_balance_app")
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import tkinter as tk  # noqa: E402
 
 import gui  # noqa: E402

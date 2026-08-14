@@ -4,9 +4,10 @@
 验证：DeepSeek/OpenRouter 有 Token 维度，Kimi/智谱/硅基流动无 Token（接口无该维度），
 按「有就保留，没有才舍去」记录。合并、过滤、Token 计算正确。
 """
+import os
 import sys
 
-sys.path.insert(0, r"c:/Users/13404/model_balance_app")
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import gui  # noqa: E402
 
 

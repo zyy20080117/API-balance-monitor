@@ -1,5 +1,9 @@
 # -*- coding: utf-8 -*-
 """排序功能逻辑测试：模式记忆 + 数据更新后重排 + 余额缺失排最后。不启动 GUI。"""
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import gui  # noqa: E402
 
 
